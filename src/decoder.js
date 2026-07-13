@@ -101,10 +101,10 @@ async function readCid (reader, sectionLength) {
  *
  * @name async decoder.readBlockHead(reader)
  * @param {BytesReader} reader
- * @param {CarLimits} limits
+ * @param {CarLimits} [limits]
  * @returns {Promise<BlockHeader>}
  */
-export async function readBlockHead (reader, limits) {
+export async function readBlockHead (reader, limits = resolveLimits()) {
   // length includes a CID + Binary, where CID has a variable length
   // we have to deal with
   const start = reader.pos

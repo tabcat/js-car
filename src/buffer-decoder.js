@@ -102,10 +102,10 @@ function readCid (reader, sectionLength) {
  *
  * @name decoder.readBlockHead(reader)
  * @param {BytesBufferReader} reader
- * @param {CarLimits} limits
+ * @param {CarLimits} [limits]
  * @returns {BlockHeader}
  */
-export function readBlockHead (reader, limits) {
+export function readBlockHead (reader, limits = resolveLimits()) {
   // length includes a CID + Binary, where CID has a variable length
   // we have to deal with
   const start = reader.pos

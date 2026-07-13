@@ -224,35 +224,28 @@ caps, both **on by default** and matching [go-car](https://github.com/ipld/go-ca
 | `maxAllowedHeaderSize` | the CAR header (the dag-cbor header block) | `32 << 20` (32 MiB) |
 | `maxAllowedSectionSize` | each section: the CID plus its block body, combined | `8 << 20` (8 MiB) |
 
+Separately, the decoder caps a single multihash **digest** at a hardcoded 32 MiB
+(matching go-cid's unexported `maxDigestAlloc`).
+
 Both count the varint-declared length, excluding the varint prefix itself, which is
 the quantity go-car's parser compares. A length strictly greater than a cap throws a
 `RangeError`, on decode from the length prefix before the body is read, skipped, or
 pulled from the source, and on encode before any bytes for that item are written.
 
 Because `maxAllowedSectionSize` bounds the CID and body together, the effective
-maximum block body is the cap minus its CID (about 8388572 bytes for a normal
-sha2-256 CIDv1, not 8 MiB exactly).
+maximum block body is the cap minus its CID.
 
 Passing `undefined` for a cap uses its default. Set a cap to `0` to reject every
-section, or to `Number.MAX_SAFE_INTEGER` to disable it (the `varint` package refuses
-to decode a length above 2^53-1, so a cap there can never fire). A provided value
-that is not a non-negative safe integer throws a `TypeError`.
+section, or to `Number.MAX_SAFE_INTEGER` to effectively disable it (~8 PiB).
+A provided value that is not a non-negative safe integer throws a `TypeError`.
 
 The caps apply to every entry point that parses or emits the CAR format:
 
+- encode: `CarWriter.create`, `CarWriter.createAppender`, `CarBufferWriter.createWriter`
 - decode, streaming: `CarReader.fromIterable`, `CarBlockIterator.fromIterable`,
   `CarCIDIterator.fromIterable`, `CarIndexer.fromIterable`, `CarIndexedReader.fromFile`
 - decode, in-memory: `CarReader.fromBytes`, `CarBlockIterator.fromBytes`,
   `CarCIDIterator.fromBytes`, `CarIndexer.fromBytes`, `CarBufferReader.fromBytes`
-- encode: `CarWriter.create`, `CarWriter.createAppender`, `CarBufferWriter.createWriter`
-
-Setting the same `CarCodecOptions` on both ends gives one size profile that holds on
-read and write, so the library never emits a CAR it would refuse to read back.
-`CarWriter.updateRootsInBytes` and `CarWriter.updateRootsInFile` take no options; they
-overwrite a header in place under the default header cap.
-
-Separately, the decoder caps a single multihash **digest** at a hardcoded 32 MiB
-(matching go-cid's unexported `maxDigestAlloc`).
 
 ## API
 

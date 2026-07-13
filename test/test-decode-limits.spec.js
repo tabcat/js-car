@@ -6,13 +6,6 @@ import { CarBufferReader } from '../src/buffer-reader.js'
 import { CarBlockIterator } from '../src/iterator.js'
 import { assert, carBytes, goCarV2Bytes, makeIterable, rndCid } from './common.js'
 
-// The caps live in one shared decode path (createDecoder -> readHeader /
-// readBlockHead / readCid). We exercise that path once, through
-// CarBlockIterator.fromIterable. The other streaming entry points and the
-// fromBytes forms only thread the same options into the same path, so they are
-// taken as given. CarBufferReader is the separate synchronous decoder and gets a
-// single smoke test. Option validation is covered in test-limits.spec.js.
-
 /**
  * Drive a CarBlockIterator decode to completion and return the block count.
  * Rejects if decoding rejects at any point.
@@ -133,16 +126,27 @@ describe('decode size limits', () => {
     const hugeDigest = (32 << 20) + 1
     const cidPrefix = concatBytes([Uint8Array.from([0x01, 0x55, 0x12]), Uint8Array.from(vEncode(hugeDigest))])
     const section = concatBytes([Uint8Array.from(vEncode(cidPrefix.length + 1)), cidPrefix])
-    // section cap lifted so the section bound passes; the digest cap fires first
-    await assert.isRejected(
-      decodeAll(concatBytes([validV1Header, section]), { maxAllowedSectionSize: Number.MAX_SAFE_INTEGER }),
-      RangeError,
-      'CID digest'
-    )
+    // the digest cap fires while reading the multihash length, before the CID is
+    // measured against the section, so it applies even under the default caps
+    await assert.isRejected(decodeAll(concatBytes([validV1Header, section])), RangeError, 'CID digest')
   })
 
-  it('the synchronous CarBufferReader enforces the same caps', () => {
-    assert.ok(CarBufferReader.fromBytes(carBytes).blocks().length > 0)
-    assert.throws(() => CarBufferReader.fromBytes(sectionDeclaring(1_000_000_000)), RangeError, 'maxAllowedSectionSize')
+  // buffer-decoder.js is a separate synchronous implementation, not just a
+  // threading of the async path, so its own cap branches are exercised here.
+  describe('the synchronous CarBufferReader shares the same caps', () => {
+    it('decodes a normal CAR and rejects an oversized section', () => {
+      assert.ok(CarBufferReader.fromBytes(carBytes).blocks().length > 0)
+      assert.throws(() => CarBufferReader.fromBytes(sectionDeclaring(1_000_000_000)), RangeError, 'maxAllowedSectionSize')
+    })
+
+    it('rejects a header over an explicit cap', () => {
+      assert.throws(() => CarBufferReader.fromBytes(carBytes, { maxAllowedHeaderSize: 10 }), RangeError, 'maxAllowedHeaderSize')
+    })
+
+    it('rejects a CIDv1 declaring a multihash past the section end', () => {
+      const cidPrefix = concatBytes([Uint8Array.from([0x01, 0x55, 0x12]), Uint8Array.from(vEncode(1000))])
+      const section = concatBytes([Uint8Array.from(vEncode(cidPrefix.length + 1)), cidPrefix])
+      assert.throws(() => CarBufferReader.fromBytes(concatBytes([validV1Header, section])), Error, 'exceeds section length')
+    })
   })
 })

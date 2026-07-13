@@ -131,6 +131,7 @@ export const blockLength = ({ cid, bytes }) => {
  */
 export const addBlock = (writer, { cid, bytes }) => {
   const byteLength = cid.bytes.byteLength + bytes.byteLength
+  // check the section cap before buffer capacity
   if (byteLength > writer.limits.maxAllowedSectionSize) {
     throw new RangeError(`CAR section of length ${byteLength} exceeds maxAllowedSectionSize of ${writer.limits.maxAllowedSectionSize}`)
   }

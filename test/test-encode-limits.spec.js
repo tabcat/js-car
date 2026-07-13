@@ -127,16 +127,18 @@ describe('encode size limits', () => {
   })
 
   describe('round-trip guarantee', () => {
-    it('a CAR written with a raised cap decodes under the same profile', async () => {
-      const data = await makeData()
-      const profile = { maxAllowedSectionSize: Number.MAX_SAFE_INTEGER, maxAllowedHeaderSize: Number.MAX_SAFE_INTEGER }
-      const bytes = await writeAll(roots, data.allBlocksFlattened, profile)
+    it('a section written at a real custom cap decodes back under the same cap', async () => {
+      // exercise the write-side (cid.bytes.length + bytes.length) and read-side
+      // (sectionLength) arithmetic against the same non-trivial cap
+      const cap = rawBlocks[0].cid.bytes.length + 8
+      const profile = { maxAllowedSectionSize: cap, maxAllowedHeaderSize: 1 << 20 }
+      const bytes = await writeAll(roots, [blockOfSection(rawBlocks[0].cid, cap)], profile)
       const reader = await CarReader.fromIterable(makeIterable(bytes, 64), profile)
       const decoded = []
       for await (const block of reader.blocks()) {
         decoded.push(block)
       }
-      assert.strictEqual(decoded.length, data.allBlocksFlattened.length)
+      assert.strictEqual(decoded.length, 1)
     })
 
     it('default-written bytes are identical to explicitly-default-capped bytes', async () => {
@@ -180,6 +182,14 @@ describe('encode size limits', () => {
       })
       const big = { cid, bytes: new Uint8Array(1 << 20) }
       assert.throws(() => writer.write(big), RangeError, 'maxAllowedSectionSize')
+    })
+
+    it('writes a block whose section is exactly at the cap without throwing', () => {
+      const cid = rawBlocks[0].cid
+      const cap = cid.bytes.length + 8
+      const writer = CarBufferWriter.createWriter(new ArrayBuffer(1 << 16), { roots: [], maxAllowedSectionSize: cap })
+      writer.write({ cid, bytes: new Uint8Array(cap - cid.bytes.length) })
+      assert.strictEqual(CarBufferReader.fromBytes(writer.close()).blocks().length, 1)
     })
 
     it('defaults allow a normal block and the result round-trips', () => {
