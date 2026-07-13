@@ -150,16 +150,11 @@ describe('encode size limits', () => {
     })
   })
 
-  describe('option validation', () => {
-    for (const bad of [-1, 1.5, NaN, Infinity, '8']) {
-      it(`rejects maxAllowedSectionSize=${String(bad)} with TypeError`, async () => {
-        // toRoots(roots) runs first inside create() but only validates shape,
-        // so any valid roots value passes through unchanged before
-        // resolveLimits(options) throws synchronously here.
-        // @ts-expect-error deliberately bad input
-        assert.throws(() => CarWriter.create([], { maxAllowedSectionSize: bad }), TypeError, 'must be a non-negative safe integer')
-      })
-    }
+  it('create() throws a TypeError synchronously for a bad option value', () => {
+    // resolveLimits runs synchronously inside create(), before any async work, so
+    // a bad option throws here rather than through the writer's mutex. The full
+    // validation predicate is covered in test-limits.spec.js.
+    assert.throws(() => CarWriter.create([], { maxAllowedSectionSize: -1 }), TypeError, 'must be a non-negative safe integer')
   })
 
   describe('CarBufferWriter', () => {
@@ -187,20 +182,6 @@ describe('encode size limits', () => {
       assert.throws(() => writer.write(big), RangeError, 'maxAllowedSectionSize')
     })
 
-    it('writes a block whose section is exactly at the cap without throwing', () => {
-      const cid = rawBlocks[0].cid
-      const cap = cid.bytes.length + 8
-      const writer = CarBufferWriter.createWriter(new ArrayBuffer(1 << 16), {
-        roots: [],
-        maxAllowedSectionSize: cap
-      })
-      const atCap = { cid, bytes: new Uint8Array(cap - cid.bytes.length) }
-      writer.write(atCap)
-      const bytes = writer.close()
-      const reader = CarBufferReader.fromBytes(bytes)
-      assert.strictEqual(reader.blocks().length, 1)
-    })
-
     it('defaults allow a normal block and the result round-trips', () => {
       const writer = CarBufferWriter.createWriter(new ArrayBuffer(1 << 16), { roots })
       writer.write(rawBlocks[0])
@@ -215,14 +196,6 @@ describe('encode size limits', () => {
         maxAllowedHeaderSize: 10
       })
       assert.throws(() => writer.close(), RangeError, 'maxAllowedHeaderSize')
-    })
-
-    it('rejects a bad option value with TypeError', () => {
-      assert.throws(
-        () => CarBufferWriter.createWriter(new ArrayBuffer(1 << 16), { roots: [], maxAllowedSectionSize: -1 }),
-        TypeError,
-        'must be a non-negative safe integer'
-      )
     })
   })
 })

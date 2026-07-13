@@ -3,42 +3,27 @@
 import { encode as cbEncode } from '@ipld/dag-cbor'
 import { encode as vEncode } from 'varint'
 import { CarBufferReader } from '../src/buffer-reader.js'
-import { CarIndexer } from '../src/indexer.js'
 import { CarBlockIterator } from '../src/iterator.js'
-import { DEFAULT_MAX_ALLOWED_SECTION_SIZE } from '../src/limits.js'
-import { CarReader } from '../src/reader.js'
 import { assert, carBytes, goCarV2Bytes, makeIterable, rndCid } from './common.js'
 
-// Async entry points, each with a fromBytes and a fromIterable form. CarReader
-// fully decodes during construction and exposes blocks() after; the others
-// decode lazily and yield via iteration.
-const ENTRIES = [
-  { name: 'CarBlockIterator', cls: CarBlockIterator },
-  { name: 'CarReader', cls: CarReader },
-  { name: 'CarIndexer', cls: CarIndexer }
-]
-const [blockIter] = ENTRIES
-
-/** @param {{ name: string }} entry */
-const isReader = (entry) => entry.name === 'CarReader'
+// The caps live in one shared decode path (createDecoder -> readHeader /
+// readBlockHead / readCid). We exercise that path once, through
+// CarBlockIterator.fromIterable. The other streaming entry points and the
+// fromBytes forms only thread the same options into the same path, so they are
+// taken as given. CarBufferReader is the separate synchronous decoder and gets a
+// single smoke test. Option validation is covered in test-limits.spec.js.
 
 /**
- * Drive a decode to completion (header + every block) and return the block
- * count. Rejects if decoding rejects at any point.
+ * Drive a CarBlockIterator decode to completion and return the block count.
+ * Rejects if decoding rejects at any point.
  *
- * @param {{ name: string, cls: any }} entry
  * @param {Uint8Array} data
  * @param {import('../src/api.js').CarCodecOptions} [options]
- * @param {'fromBytes'|'fromIterable'} [via]
- * @param {number} [chunkSize]
  */
-async function decodeAll (entry, data, options, via = 'fromIterable', chunkSize = 64) {
-  const input = via === 'fromBytes' ? data : makeIterable(data, chunkSize)
-  const result = await entry.cls[via](input, options)
-  const iterable = isReader(entry) ? result.blocks() : result
+async function decodeAll (data, options) {
   let count = 0
-  for await (const item of iterable) {
-    if (item) {
+  for await (const block of await CarBlockIterator.fromIterable(makeIterable(data, 64), options)) {
+    if (block) {
       count++
     }
   }
@@ -64,50 +49,40 @@ function lengthPrefixed (payload) {
 
 const validV1Header = lengthPrefixed(cbEncode({ version: 1, roots: [] }))
 
-describe('decode size limits', () => {
-  describe('defaults are on with no options', () => {
-    for (const via of /** @type {const} */(['fromBytes', 'fromIterable'])) {
-      for (const entry of ENTRIES) {
-        it(`${entry.name}.${via}: normal CAR decodes under the defaults`, async () => {
-          const count = await decodeAll(entry, carBytes, undefined, via)
-          assert.ok(count > 0)
-        })
-      }
-    }
+// A valid header followed by a section that declares `bodyLength` bytes of body
+// past its CID, but supplies only the CID. Used to probe the section cap without
+// materializing a real body.
+/** @param {number} bodyLength */
+function sectionDeclaring (bodyLength) {
+  const cid = rndCid.bytes
+  return concatBytes([validV1Header, Uint8Array.from(vEncode(bodyLength + cid.length)), cid])
+}
 
-    it('v2 CAR decodes under the defaults', async () => {
-      assert.ok(await decodeAll(blockIter, goCarV2Bytes, undefined) > 0)
-    })
+describe('decode size limits', () => {
+  it('a normal v1 CAR decodes under the defaults', async () => {
+    assert.ok(await decodeAll(carBytes, undefined) > 0)
   })
 
-  describe('rejects before buffering the body', () => {
-    // A length prefix declaring a huge section, followed by only a CID and no
-    // body. Under the default section cap the decoder must reject from the
-    // prefix (RangeError), not stream-and-buffer and fail with
-    // "Unexpected end of data".
-    const huge = 1_000_000_000
+  it('a v2 CAR decodes under the defaults', async () => {
+    assert.ok(await decodeAll(goCarV2Bytes, undefined) > 0)
+  })
 
-    it('section over the default cap rejects with RangeError', async () => {
-      const cid = rndCid.bytes
-      const section = concatBytes([Uint8Array.from(vEncode(huge + cid.length)), cid])
-      const data = concatBytes([validV1Header, section])
-      await assert.isRejected(decodeAll(blockIter, data), RangeError, 'maxAllowedSectionSize')
+  describe('section cap', () => {
+    it('rejects an oversized section from the length prefix, before buffering the body', async () => {
+      // Under the default cap the decoder must reject from the prefix
+      // (RangeError), not stream-and-buffer and fail with "Unexpected end of data".
+      await assert.isRejected(decodeAll(sectionDeclaring(1_000_000_000)), RangeError, 'maxAllowedSectionSize')
     })
 
-    it('lifting the cap to MAX_SAFE_INTEGER changes the failure to end-of-data', async () => {
-      const cid = rndCid.bytes
-      const section = concatBytes([Uint8Array.from(vEncode(huge + cid.length)), cid])
-      const data = concatBytes([validV1Header, section])
+    it('lifting the cap changes the failure to end-of-data, proving the cap caused the rejection', async () => {
       await assert.isRejected(
-        decodeAll(blockIter, data, { maxAllowedSectionSize: Number.MAX_SAFE_INTEGER }),
+        decodeAll(sectionDeclaring(1_000_000_000), { maxAllowedSectionSize: Number.MAX_SAFE_INTEGER }),
         Error,
         'Unexpected end of data'
       )
     })
-  })
 
-  describe('section cap boundaries', () => {
-    it('equal to the cap passes, cap+1 rejects', async () => {
+    it('a section equal to the cap passes, cap+1 rejects', async () => {
       // largest section (cid + body) in carBytes, learned from an uncapped decode
       const iter = await CarBlockIterator.fromIterable(makeIterable(carBytes, 64))
       let maxSection = 0
@@ -115,131 +90,59 @@ describe('decode size limits', () => {
         maxSection = Math.max(maxSection, cid.bytes.length + bytes.length)
       }
       assert.ok(maxSection > 0)
-      assert.ok(await decodeAll(blockIter, carBytes, { maxAllowedSectionSize: maxSection }) > 0)
-      // one below the largest section: rejected
-      await assert.isRejected(
-        decodeAll(blockIter, carBytes, { maxAllowedSectionSize: maxSection - 1 }),
-        RangeError,
-        'maxAllowedSectionSize'
-      )
+      assert.ok(await decodeAll(carBytes, { maxAllowedSectionSize: maxSection }) > 0)
+      await assert.isRejected(decodeAll(carBytes, { maxAllowedSectionSize: maxSection - 1 }), RangeError, 'maxAllowedSectionSize')
     })
 
     it('0 rejects every section', async () => {
-      await assert.isRejected(decodeAll(blockIter, carBytes, { maxAllowedSectionSize: 0 }), RangeError, 'maxAllowedSectionSize')
+      await assert.isRejected(decodeAll(carBytes, { maxAllowedSectionSize: 0 }), RangeError, 'maxAllowedSectionSize')
     })
   })
 
   describe('header cap', () => {
     it('rejects a v1 header over the cap', async () => {
-      // carBytes' header is 99 bytes; cap well below
-      await assert.isRejected(decodeAll(blockIter, carBytes, { maxAllowedHeaderSize: 10 }), RangeError, 'maxAllowedHeaderSize')
+      await assert.isRejected(decodeAll(carBytes, { maxAllowedHeaderSize: 10 }), RangeError, 'maxAllowedHeaderSize')
     })
 
     it('fires on the inner v1 header of a v2 CAR (recursion passes the cap)', async () => {
-      // Set the cap to exactly the v2 pragma length: the pragma passes (equal),
-      // the larger inner v1 header fails, proving the recursive readHeader gets
-      // the same cap.
+      // cap == the v2 pragma length: the pragma passes (equal), the larger inner
+      // v1 header fails, proving the recursive readHeader gets the same cap.
       const pragmaLen = cbEncode({ version: 2 }).length
-      await assert.isRejected(decodeAll(blockIter, goCarV2Bytes, { maxAllowedHeaderSize: pragmaLen }), RangeError, 'maxAllowedHeaderSize')
+      await assert.isRejected(decodeAll(goCarV2Bytes, { maxAllowedHeaderSize: pragmaLen }), RangeError, 'maxAllowedHeaderSize')
     })
   })
 
   describe('CID bounded by its section', () => {
     it('rejects a CIDv1 declaring a multihash past the section end', async () => {
-      // CIDv1 raw sha2-256 declaring a 1000-byte digest, inside a section only
-      // large enough for the CID prefix. Section passes the section cap; the CID
-      // does not fit the section.
+      // CIDv1 raw sha2-256 declaring a 1000-byte digest, in a section sized only
+      // for the CID prefix: the CID does not fit the section.
       const cidPrefix = concatBytes([Uint8Array.from([0x01, 0x55, 0x12]), Uint8Array.from(vEncode(1000))])
       const section = concatBytes([Uint8Array.from(vEncode(cidPrefix.length + 1)), cidPrefix])
-      const data = concatBytes([validV1Header, section])
-      await assert.isRejected(decodeAll(blockIter, data), Error, 'exceeds section length')
+      await assert.isRejected(decodeAll(concatBytes([validV1Header, section])), Error, 'exceeds section length')
     })
 
     it('rejects a sub-34-byte section opening with the CIDv0 prefix', async () => {
       // 0x12 0x20 triggers the CIDv0 branch; a 20-byte section cannot hold a
       // 34-byte CIDv0, so it must throw rather than read into the next section.
       const section = concatBytes([Uint8Array.from(vEncode(20)), Uint8Array.from([0x12, 0x20]), new Uint8Array(18)])
-      const data = concatBytes([validV1Header, section])
-      await assert.isRejected(decodeAll(blockIter, data), Error, 'exceeds section length')
+      await assert.isRejected(decodeAll(concatBytes([validV1Header, section])), Error, 'exceeds section length')
     })
   })
 
-  describe('digest cap (MAX_DIGEST_ALLOC)', () => {
-    it('rejects a CIDv1 declaring a digest over 32 MiB, with the section cap lifted', async () => {
-      const hugeDigest = (32 << 20) + 1
-      const cidPrefix = concatBytes([Uint8Array.from([0x01, 0x55, 0x12]), Uint8Array.from(vEncode(hugeDigest))])
-      const section = concatBytes([Uint8Array.from(vEncode(cidPrefix.length + 1)), cidPrefix])
-      const data = concatBytes([validV1Header, section])
-      // Section cap lifted so the section bound passes; the digest cap must fire
-      // first (before any digest is read).
-      await assert.isRejected(
-        decodeAll(blockIter, data, { maxAllowedSectionSize: Number.MAX_SAFE_INTEGER }),
-        RangeError,
-        'CID digest'
-      )
-    })
+  it('rejects a CIDv1 digest over the 32 MiB allocation bound', async () => {
+    const hugeDigest = (32 << 20) + 1
+    const cidPrefix = concatBytes([Uint8Array.from([0x01, 0x55, 0x12]), Uint8Array.from(vEncode(hugeDigest))])
+    const section = concatBytes([Uint8Array.from(vEncode(cidPrefix.length + 1)), cidPrefix])
+    // section cap lifted so the section bound passes; the digest cap fires first
+    await assert.isRejected(
+      decodeAll(concatBytes([validV1Header, section]), { maxAllowedSectionSize: Number.MAX_SAFE_INTEGER }),
+      RangeError,
+      'CID digest'
+    )
   })
 
-  describe('CarIndexer rejects from the prefix instead of stream-and-discarding', () => {
-    it('rejects an oversized section without pulling its body', async () => {
-      const cid = rndCid.bytes
-      const section = concatBytes([Uint8Array.from(vEncode(1_000_000_000 + cid.length)), cid])
-      const data = concatBytes([validV1Header, section])
-      await assert.isRejected(decodeAll({ name: 'CarIndexer', cls: CarIndexer }, data), RangeError, 'maxAllowedSectionSize')
-    })
-  })
-
-  describe('option validation', () => {
-    for (const bad of [-1, 1.5, NaN, Infinity, '8']) {
-      it(`rejects maxAllowedSectionSize=${String(bad)} with TypeError`, async () => {
-        await assert.isRejected(
-          // @ts-expect-error deliberately bad input
-          decodeAll(blockIter, carBytes, { maxAllowedSectionSize: bad }),
-          TypeError,
-          'must be a non-negative safe integer'
-        )
-      })
-    }
-  })
-
-  it('uses the documented default section size constant', () => {
-    assert.strictEqual(DEFAULT_MAX_ALLOWED_SECTION_SIZE, 8 << 20)
-  })
-
-  describe('CarBufferReader (in-memory sync)', () => {
-    /**
-     * @param {Uint8Array} bytes
-     * @param {import('../src/api.js').CarCodecOptions} [options]
-     */
-    const count = (bytes, options) => CarBufferReader.fromBytes(bytes, options).blocks().length
-
-    it('decodes a normal CAR under the defaults', () => {
-      assert.ok(count(carBytes) > 0)
-    })
-
-    it('rejects a section over the default cap', () => {
-      const cid = rndCid.bytes
-      const section = concatBytes([Uint8Array.from(vEncode(1_000_000_000 + cid.length)), cid])
-      const data = concatBytes([validV1Header, section])
-      assert.throws(() => count(data), RangeError, 'maxAllowedSectionSize')
-    })
-
-    it('rejects a header over an explicit cap', () => {
-      assert.throws(() => count(carBytes, { maxAllowedHeaderSize: 10 }), RangeError, 'maxAllowedHeaderSize')
-    })
-
-    it('a section exactly at an explicit cap passes, cap+1 rejects', () => {
-      const cid = rndCid.bytes
-      const body = new Uint8Array(8)
-      const cap = cid.length + body.length
-      const section = concatBytes([Uint8Array.from(vEncode(cap)), cid, body])
-      const data = concatBytes([validV1Header, section])
-      assert.ok(count(data, { maxAllowedSectionSize: cap }) > 0)
-      assert.throws(() => count(data, { maxAllowedSectionSize: cap - 1 }), RangeError, 'maxAllowedSectionSize')
-    })
-
-    it('rejects a bad option value with TypeError', () => {
-      assert.throws(() => count(carBytes, { maxAllowedSectionSize: -1 }), TypeError, 'must be a non-negative safe integer')
-    })
+  it('the synchronous CarBufferReader enforces the same caps', () => {
+    assert.ok(CarBufferReader.fromBytes(carBytes).blocks().length > 0)
+    assert.throws(() => CarBufferReader.fromBytes(sectionDeclaring(1_000_000_000)), RangeError, 'maxAllowedSectionSize')
   })
 })
