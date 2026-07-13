@@ -37,10 +37,11 @@ class CarBufferWriter {
     this.roots = []
     this.headerSize = headerSize
 
-    /** @readonly */
-    this.maxAllowedHeaderSize = limits.maxAllowedHeaderSize
-    /** @readonly */
-    this.maxAllowedSectionSize = limits.maxAllowedSectionSize
+    /**
+     * @readonly
+     * @type {import('./limits.js').CarLimits}
+     */
+    this.limits = limits
   }
 
   /**
@@ -130,8 +131,8 @@ export const blockLength = ({ cid, bytes }) => {
  */
 export const addBlock = (writer, { cid, bytes }) => {
   const byteLength = cid.bytes.byteLength + bytes.byteLength
-  if (byteLength > writer.maxAllowedSectionSize) {
-    throw new RangeError(`CAR section of length ${byteLength} exceeds maxAllowedSectionSize of ${writer.maxAllowedSectionSize}`)
+  if (byteLength > writer.limits.maxAllowedSectionSize) {
+    throw new RangeError(`CAR section of length ${byteLength} exceeds maxAllowedSectionSize of ${writer.limits.maxAllowedSectionSize}`)
   }
   const size = varint.encode(byteLength)
   if (writer.byteOffset + size.length + byteLength > writer.bytes.byteLength) {
@@ -153,8 +154,8 @@ export const close = (writer, options = {}) => {
   const { roots, bytes, byteOffset, headerSize } = writer
 
   const headerBytes = CBOR.encode({ version: 1, roots })
-  if (headerBytes.length > writer.maxAllowedHeaderSize) {
-    throw new RangeError(`CAR header of length ${headerBytes.length} exceeds maxAllowedHeaderSize of ${writer.maxAllowedHeaderSize}`)
+  if (headerBytes.length > writer.limits.maxAllowedHeaderSize) {
+    throw new RangeError(`CAR header of length ${headerBytes.length} exceeds maxAllowedHeaderSize of ${writer.limits.maxAllowedHeaderSize}`)
   }
   const varintBytes = varint.encode(headerBytes.length)
 
