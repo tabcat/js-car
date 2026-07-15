@@ -59,7 +59,6 @@ export interface BlockWriter {
 }
 
 export interface CarBufferWriter {
-  readonly limits: CarLimits
   addRoot(root: CID, options?: { resize?: boolean }): CarBufferWriter
   write(block: Block): CarBufferWriter
   close(options?: { resize?: boolean }): Uint8Array
@@ -77,9 +76,6 @@ export interface CarCodecOptions {
   maxAllowedHeaderSize?: number // default 32 << 20 (32MiB)
   maxAllowedSectionSize?: number // default 8 << 20 (8MiB)
 }
-
-// A CarCodecOptions with every cap resolved to a concrete value.
-export type CarLimits = Required<CarCodecOptions>
 
 export interface WriterChannel {
   writer: BlockWriter

@@ -1,6 +1,6 @@
 /**
  * @typedef {import('./api.js').CarCodecOptions} CarCodecOptions
- * @typedef {import('./api.js').CarLimits} CarLimits
+ * @typedef {Required<CarCodecOptions>} CarLimits
  */
 
 // Matches go-car's DefaultMaxAllowedHeaderSize / DefaultMaxAllowedSectionSize
