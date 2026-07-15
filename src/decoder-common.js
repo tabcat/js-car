@@ -80,10 +80,10 @@ export function getMultihashLength (bytes) {
 
   varint.decode(bytes) // code
   const codeLength = /** @type {number} */(varint.decode.bytes)
-  const digestLength = varint.decode(bytes.subarray(codeLength))
+  const length = varint.decode(bytes.subarray(varint.decode.bytes))
   const lengthLength = /** @type {number} */(varint.decode.bytes)
-  if (digestLength > MAX_DIGEST_ALLOC) {
-    throw new RangeError(`CID digest of length ${digestLength} exceeds maximum of ${MAX_DIGEST_ALLOC}`)
+  if (length > MAX_DIGEST_ALLOC) {
+    throw new RangeError(`CID digest of length ${length} exceeds maximum of ${MAX_DIGEST_ALLOC}`)
   }
-  return codeLength + lengthLength + digestLength
+  return codeLength + lengthLength + length
 }

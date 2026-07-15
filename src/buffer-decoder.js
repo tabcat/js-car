@@ -71,7 +71,7 @@ function readCid (reader, sectionLength) {
   const cidStart = reader.pos
   const first = reader.exactly(2, false)
   if (first[0] === CIDV0_BYTES.SHA2_256 && first[1] === CIDV0_BYTES.LENGTH) {
-    // cidv0: 0x12 code byte + 0x20 length byte + 32-byte sha2-256 digest
+    // cidv0 32-byte sha2-256
     const cidLength = 34
     if (cidLength > sectionLength) {
       throw new Error(`Invalid CAR section (CID of length ${cidLength} exceeds section length ${sectionLength})`)
