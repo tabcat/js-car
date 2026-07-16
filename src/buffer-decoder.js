@@ -14,7 +14,6 @@ import { resolveLimits } from './limits.js'
  * @typedef {import('./coding.js').CarV2Header} CarV2Header
  * @typedef {import('./coding.js').CarV2FixedHeader} CarV2FixedHeader
  * @typedef {import('./api.js').CarCodecOptions} CarCodecOptions
- * @typedef {import('./limits.js').CarLimits} CarLimits
  */
 
 /**
@@ -24,10 +23,11 @@ import { resolveLimits } from './limits.js'
  * @name decoder.readHeader(reader)
  * @param {BytesBufferReader} reader
  * @param {number} [strictVersion]
- * @param {CarLimits} [limits]
+ * @param {CarCodecOptions} [options]
  * @returns {CarHeader | CarV2Header}
  */
-export function readHeader (reader, strictVersion, limits = resolveLimits()) {
+export function readHeader (reader, strictVersion, options) {
+  const limits = resolveLimits(options)
   const length = decodeVarint(reader.upTo(8), reader)
   if (length === 0) {
     throw new Error('Invalid CAR header (zero length)')
@@ -56,7 +56,7 @@ export function readHeader (reader, strictVersion, limits = resolveLimits()) {
   }
   const v2Header = decodeV2Header(reader.exactly(V2_HEADER_LENGTH, true))
   reader.seek(v2Header.dataOffset - reader.pos)
-  const v1Header = readHeader(reader, 1, limits)
+  const v1Header = readHeader(reader, 1, options)
   return Object.assign(v1Header, v2Header)
 }
 
@@ -102,10 +102,11 @@ function readCid (reader, sectionLength) {
  *
  * @name decoder.readBlockHead(reader)
  * @param {BytesBufferReader} reader
- * @param {CarLimits} [limits]
+ * @param {CarCodecOptions} [options]
  * @returns {BlockHeader}
  */
-export function readBlockHead (reader, limits = resolveLimits()) {
+export function readBlockHead (reader, options) {
+  const limits = resolveLimits(options)
   // length includes a CID + Binary, where CID has a variable length
   // we have to deal with
   const start = reader.pos
@@ -129,9 +130,8 @@ export function readBlockHead (reader, limits = resolveLimits()) {
  * @returns {{ header : CarHeader | CarV2Header , blocks: Block[]}}
  */
 export function fromBytes (bytes, options) {
-  const limits = resolveLimits(options)
   let reader = bytesReader(bytes)
-  const header = readHeader(reader, undefined, limits)
+  const header = readHeader(reader, undefined, options)
   if (header.version === 2) {
     const v1length = reader.pos - header.dataOffset
     reader = limitReader(reader, header.dataSize - v1length)
@@ -139,7 +139,7 @@ export function fromBytes (bytes, options) {
 
   const blocks = []
   while (reader.upTo(8).length > 0) {
-    const { cid, blockLength } = readBlockHead(reader, limits)
+    const { cid, blockLength } = readBlockHead(reader, options)
 
     blocks.push({ cid, bytes: reader.exactly(blockLength, true) })
   }

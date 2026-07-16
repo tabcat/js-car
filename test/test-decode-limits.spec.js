@@ -3,6 +3,7 @@
 import { encode as cbEncode } from '@ipld/dag-cbor'
 import { encode as vEncode } from 'varint'
 import { CarBufferReader } from '../src/buffer-reader.js'
+import { bytesReader, readBlockHead, readHeader } from '../src/decoder.js'
 import { CarBlockIterator } from '../src/iterator.js'
 import { assert, carBytes, goCarV2Bytes, makeIterable, rndCid } from './common.js'
 
@@ -103,6 +104,22 @@ describe('decode size limits', () => {
       const pragmaLen = cbEncode({ version: 2 }).length
       await assert.isRejected(decodeAll(goCarV2Bytes, { maxAllowedHeaderSize: pragmaLen }), RangeError, 'maxAllowedHeaderSize')
     })
+
+    it('rejects an oversized header from the length prefix, before buffering it', async () => {
+      // Declare a huge header length with no header body. Under the default cap
+      // the decoder must reject from the prefix, not buffer-and-fail.
+      const data = concatBytes([Uint8Array.from(vEncode(1_000_000_000)), Uint8Array.from([1, 2, 3])])
+      await assert.isRejected(decodeAll(data), RangeError, 'maxAllowedHeaderSize')
+    })
+
+    it('lifting the header cap changes the failure to end-of-data', async () => {
+      const data = concatBytes([Uint8Array.from(vEncode(1_000_000_000)), Uint8Array.from([1, 2, 3])])
+      await assert.isRejected(
+        decodeAll(data, { maxAllowedHeaderSize: Number.MAX_SAFE_INTEGER }),
+        Error,
+        'Unexpected end of data'
+      )
+    })
   })
 
   describe('CID bounded by its section', () => {
@@ -147,6 +164,30 @@ describe('decode size limits', () => {
       const cidPrefix = concatBytes([Uint8Array.from([0x01, 0x55, 0x12]), Uint8Array.from(vEncode(1000))])
       const section = concatBytes([Uint8Array.from(vEncode(cidPrefix.length + 1)), cidPrefix])
       assert.throws(() => CarBufferReader.fromBytes(concatBytes([validV1Header, section])), Error, 'exceeds section length')
+    })
+
+    it('rejects a sub-34-byte section opening with the CIDv0 prefix', () => {
+      const section = concatBytes([Uint8Array.from(vEncode(20)), Uint8Array.from([0x12, 0x20]), new Uint8Array(18)])
+      assert.throws(() => CarBufferReader.fromBytes(concatBytes([validV1Header, section])), Error, 'exceeds section length')
+    })
+  })
+
+  // readHeader/readBlockHead are exported on the ./decoder subpath and resolve
+  // their options argument internally, so an omitted or partial options object
+  // still enforces both default caps rather than silently skipping the unset one.
+  describe('low-level readHeader/readBlockHead resolve their options', () => {
+    it('readBlockHead with no options enforces the default section cap', async () => {
+      const reader = bytesReader(sectionDeclaring(1_000_000_000))
+      await readHeader(reader) // consume the header first
+      await assert.isRejected(readBlockHead(reader), RangeError, 'maxAllowedSectionSize')
+    })
+
+    it('a partial options object still enforces the unset cap', async () => {
+      const reader = bytesReader(sectionDeclaring(1_000_000_000))
+      await readHeader(reader, undefined, { maxAllowedHeaderSize: 100 })
+      // maxAllowedSectionSize omitted: it must resolve to the default, not be left
+      // undefined (which would make the `>` comparison silently never fire)
+      await assert.isRejected(readBlockHead(reader, { maxAllowedHeaderSize: 100 }), RangeError, 'maxAllowedSectionSize')
     })
   })
 })

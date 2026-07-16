@@ -7,6 +7,7 @@ import { resolveLimits } from './limits.js'
  * @typedef {import('./api.js').Block} Block
  * @typedef {import('./coding.js').CarEncoder} CarEncoder
  * @typedef {import('./coding.js').IteratorChannel_Writer<Uint8Array>} IteratorChannel_Writer
+ * @typedef {import('./api.js').CarCodecOptions} CarCodecOptions
  * @typedef {import('./limits.js').CarLimits} CarLimits
  */
 
@@ -16,10 +17,11 @@ const CAR_V1_VERSION = 1
  * Create a header from an array of roots.
  *
  * @param {CID[]} roots
- * @param {CarLimits} [limits]
+ * @param {CarCodecOptions} [options]
  * @returns {Uint8Array}
  */
-export function createHeader (roots, limits = resolveLimits()) {
+export function createHeader (roots, options) {
+  const limits = resolveLimits(options)
   const headerBytes = dagCborEncode({ version: CAR_V1_VERSION, roots })
   if (headerBytes.length > limits.maxAllowedHeaderSize) {
     throw new RangeError(`CAR header of length ${headerBytes.length} exceeds maxAllowedHeaderSize of ${limits.maxAllowedHeaderSize}`)

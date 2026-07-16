@@ -283,7 +283,7 @@ export const estimateHeaderLength = (rootCount, rootByteLength = 36) =>
  * @param {number} [options.headerSize]
  * @param {number} [options.maxAllowedHeaderSize]
  * @param {number} [options.maxAllowedSectionSize]
- * @returns {CarBufferWriter}
+ * @returns {Writer}
  */
 export const createWriter = (buffer, options = {}) => {
   const {
