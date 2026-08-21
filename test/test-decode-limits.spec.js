@@ -172,22 +172,23 @@ describe('decode size limits', () => {
     })
   })
 
-  // readHeader/readBlockHead are exported on the ./decoder subpath and resolve
-  // their options argument internally, so an omitted or partial options object
-  // still enforces both default caps rather than silently skipping the unset one.
-  describe('low-level readHeader/readBlockHead resolve their options', () => {
-    it('readBlockHead with no options enforces the default section cap', async () => {
+  // readHeader/readBlockHead are exported on the ./decoder subpath and each take
+  // the single leaf limit they need (a number), defaulting when it is omitted.
+  describe('low-level readHeader/readBlockHead take a leaf limit', () => {
+    it('readBlockHead with no limit uses the default section cap', async () => {
       const reader = bytesReader(sectionDeclaring(1_000_000_000))
       await readHeader(reader) // consume the header first
       await assert.isRejected(readBlockHead(reader), RangeError, 'maxAllowedSectionSize')
     })
 
-    it('a partial options object still enforces the unset cap', async () => {
+    it('readBlockHead enforces an explicit section limit', async () => {
       const reader = bytesReader(sectionDeclaring(1_000_000_000))
-      await readHeader(reader, undefined, { maxAllowedHeaderSize: 100 })
-      // maxAllowedSectionSize omitted: it must resolve to the default, not be left
-      // undefined (which would make the `>` comparison silently never fire)
-      await assert.isRejected(readBlockHead(reader, { maxAllowedHeaderSize: 100 }), RangeError, 'maxAllowedSectionSize')
+      await readHeader(reader)
+      await assert.isRejected(readBlockHead(reader, 1000), RangeError, 'maxAllowedSectionSize')
+    })
+
+    it('readHeader enforces an explicit header limit', async () => {
+      await assert.isRejected(readHeader(bytesReader(carBytes), undefined, 10), RangeError, 'maxAllowedHeaderSize')
     })
   })
 })
