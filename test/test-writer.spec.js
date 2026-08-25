@@ -4,6 +4,7 @@ import { expect } from 'aegir/chai'
 import { bytes, CID } from 'multiformats'
 import { createEncoder } from '../src/encoder.js'
 import { create as iteratorChannel } from '../src/iterator-channel.js'
+import { resolveLimits } from '../src/limits.js'
 import { CarReader } from '../src/reader.js'
 import { CarWriterOut } from '../src/writer-browser.js'
 import { CarWriter } from '../src/writer.js'
@@ -398,7 +399,7 @@ describe('CarWriter', () => {
     // failing header write (the same seam createAppender uses)
     /** @type {import('../src/coding.js').IteratorChannel<Uint8Array>} */
     const iw = iteratorChannel()
-    const encoder = createEncoder(iw.writer)
+    const encoder = createEncoder(iw.writer, resolveLimits())
     encoder.setRoots = () => Promise.reject(new Error('setRoots failed'))
     const writer = new CarWriter([], encoder)
     const out = new CarWriterOut(iw.iterator)
