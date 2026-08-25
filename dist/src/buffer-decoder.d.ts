@@ -1,0 +1,72 @@
+/**
+ * @typedef {import('./api.js').Block} Block
+ * @typedef {import('./api.js').BlockHeader} BlockHeader
+ * @typedef {import('./api.js').BlockIndex} BlockIndex
+ * @typedef {import('./coding.js').BytesBufferReader} BytesBufferReader
+ * @typedef {import('./coding.js').CarHeader} CarHeader
+ * @typedef {import('./coding.js').CarV2Header} CarV2Header
+ * @typedef {import('./coding.js').CarV2FixedHeader} CarV2FixedHeader
+ * @typedef {import('./api.js').CarCodecOptions} CarCodecOptions
+ */
+/**
+ * Reads header data from a `BytesReader`. The header may either be in the form
+ * of a `CarHeader` or `CarV2Header` depending on the CAR being read.
+ *
+ * @name decoder.readHeader(reader)
+ * @param {BytesBufferReader} reader
+ * @param {number} [strictVersion]
+ * @param {number} [maxAllowedHeaderSize]
+ * @returns {CarHeader | CarV2Header}
+ */
+export function readHeader(reader: BytesBufferReader, strictVersion?: number, maxAllowedHeaderSize?: number): CarHeader | CarV2Header;
+/**
+ * Reads the leading data of an individual block from CAR data from a
+ * `BytesBufferReader`. Returns a `BlockHeader` object which contains
+ * `{ cid, length, blockLength }` which can be used to either index the block
+ * or read the block binary data.
+ *
+ * @name decoder.readBlockHead(reader)
+ * @param {BytesBufferReader} reader
+ * @param {number} [maxAllowedSectionSize]
+ * @returns {BlockHeader}
+ */
+export function readBlockHead(reader: BytesBufferReader, maxAllowedSectionSize?: number): BlockHeader;
+/**
+ * Returns Car header and blocks from a Uint8Array
+ *
+ * @param {Uint8Array} bytes
+ * @param {CarCodecOptions} [options]
+ * @returns {{ header : CarHeader | CarV2Header , blocks: Block[]}}
+ */
+export function fromBytes(bytes: Uint8Array, options?: CarCodecOptions): {
+    header: CarHeader | CarV2Header;
+    blocks: Block[];
+};
+/**
+ * Creates a `BytesBufferReader` from a `Uint8Array`.
+ *
+ * @name decoder.bytesReader(bytes)
+ * @param {Uint8Array} bytes
+ * @returns {BytesBufferReader}
+ */
+export function bytesReader(bytes: Uint8Array): BytesBufferReader;
+/**
+ * Wraps a `BytesBufferReader` in a limiting `BytesBufferReader` which limits maximum read
+ * to `byteLimit` bytes. It _does not_ update `pos` of the original
+ * `BytesBufferReader`.
+ *
+ * @name decoder.limitReader(reader, byteLimit)
+ * @param {BytesBufferReader} reader
+ * @param {number} byteLimit
+ * @returns {BytesBufferReader}
+ */
+export function limitReader(reader: BytesBufferReader, byteLimit: number): BytesBufferReader;
+export type Block = import("./api.js").Block;
+export type BlockHeader = import("./api.js").BlockHeader;
+export type BlockIndex = import("./api.js").BlockIndex;
+export type BytesBufferReader = import("./coding.js").BytesBufferReader;
+export type CarHeader = import("./coding.js").CarHeader;
+export type CarV2Header = import("./coding.js").CarV2Header;
+export type CarV2FixedHeader = import("./coding.js").CarV2FixedHeader;
+export type CarCodecOptions = import("./api.js").CarCodecOptions;
+//# sourceMappingURL=buffer-decoder.d.ts.map

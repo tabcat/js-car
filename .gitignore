@@ -3,6 +3,7 @@ node_modules/
 .nyc_output/
 .coverage/
 build/
-dist/
+dist/test/
+*.tsbuildinfo
 types/
 examples/node_modules/
